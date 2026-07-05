@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Data Warden</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    background:#1E1530; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; min-height:100vh; font-family:'VT323', monospace; color:#FAF7F0;
+    overflow:hidden;
+  }
+  #hud {
+    display:flex; justify-content:space-between; gap:16px; width:100%;
+    padding:8px 6px; font-size:22px; letter-spacing:1px;
+  }
+  #hud .gold { color:#D4BC85; }
+  #hud .integrity { color:#A99BB8; }
+  #stage { display:flex; flex-direction:column; align-items:center; }
+  #wrap { position:relative; }
+  canvas {
+    display:block; image-rendering:pixelated; touch-action:none;
+    border:4px solid #3D2C45; box-shadow:0 0 0 2px #B08D3E, 0 12px 40px rgba(0,0,0,.5);
+    cursor:crosshair;
+  }
+  .overlay {
+    position:absolute; inset:4px; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; text-align:center; background:rgba(30,21,48,0.84); gap:12px; padding:20px;
+  }
+  .overlay h1 { font-size:42px; color:#D4BC85; letter-spacing:2px; }
+  .overlay p { font-size:20px; color:#D8D0E0; max-width:480px; line-height:1.4; }
+  .overlay .legend { font-size:18px; line-height:1.55; }
+  .overlay .burn { color:#E8875A; }
+  .overlay .keep { color:#9FBF8F; }
+  .overlay button {
+    font-family:'VT323', monospace; font-size:24px; background:#3D2C45; color:#FAF7F0;
+    border:2px solid #B08D3E; padding:8px 26px; cursor:pointer; letter-spacing:2px;
+  }
+  .overlay button:hover { background:#B08D3E; color:#2A1E30; }
+  .hidden { display:none; }
+  #tagline { margin-top:8px; font-size:16px; color:#6B5B7A; letter-spacing:2px; text-align:center; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="hud">
+    <span class="gold">GOLD: <span id="score">0</span></span>
+    <span class="integrity">INTEGRITY OF THE ARCHIVE: <span id="integrity">100</span>%</span>
+  </div>
+  <div id="wrap">
+    <canvas id="game" width="720" height="480"></canvas>
+    <div class="overlay" id="startOverlay">
+      <h1>THE DATA WARDEN</h1>
+      <p>The dragon guards nineteen years of clean data.<br>Not everything flying toward the hoard deserves to land.</p>
+      <div class="legend">
+        <div class="burn">&#128293; BURN: confounders &middot; outliers &middot; small cohorts &middot; bias &middot; p-hacking</div>
+        <div class="keep">&#10022; PROTECT: large cohorts &middot; long follow-up &middot; proper analysis</div>
+      </div>
+      <p>Click / tap &mdash; or press SPACE &mdash; to torch the item nearest the hoard.<br>Three threats landing corrupts the archive.</p>
+      <button id="startBtn">WAKE THE WARDEN</button>
+    </div>
+    <div class="overlay hidden" id="endOverlay">
+      <h1 id="endTitle">THE ARCHIVE ENDURES</h1>
+      <p id="endStats"></p>
+      <button id="restartBtn">GUARD AGAIN</button>
+    </div>
+  </div>
+  <div id="tagline">THE QUILL &amp; THE QUERY &middot; WHERE DATA IS WRITTEN IN STARLIGHT</div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+
+const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = motionQuery.matches;
+if (motionQuery.addEventListener) motionQuery.addEventListener('change', e => { reduced = e.matches; });
+
+// ---------- RESPONSIVE SCALING ----------
+function fit(){
+  const pad = 28;
+  const s = Math.min(1, (window.innerWidth - pad) / W, (window.innerHeight - 130) / H);
+  cv.style.width  = Math.floor(W * s) + 'px';
+  cv.style.height = Math.floor(H * s) + 'px';
+  document.getElementById('hud').style.maxWidth = Math.floor(W * s) + 'px';
+}
+window.addEventListener('resize', fit);
+fit();
+
+// ---------- PALETTE ----------
+const PAL = {
+  night:'#241A38', nightHi:'#2E2246', plum:'#3D2C45', plumDeep:'#2A1E30',
+  lav:'#A99BB8', lavShade:'#7E6F8F', lavSoft:'#D8D0E0',
+  gold:'#B08D3E', goldHi:'#D4BC85', goldLo:'#8A6C2C',
+  castle:'#2F2240', castleDeep:'#241933',
+  cream:'#FAF7F0', ember:'#E8875A', emberHi:'#F2B268', flame:'#F5D76E',
+  sage:'#7E9B6E', sick:'#5E7A50', ink:'#1A1424', star:'#E8E0F0'
+};
+
+// ---------- STATE ----------
+let state = 'idle'; // idle | play | over
+let score = 0, corrupted = 0, singed = 0, burnedBad = 0, saved = 0;
+let items = [], flames = [], particles = [], zzz = [];
+let t = 0, playT = 0, spawnTimer = 0, speedMult = 1;
+let dragonMood = 'sleep'; // sleep | alert | fire | sheepish
+let moodTimer = 0, face = -1, fireCooldown = 0, flash = 0;
+const HOARD = { x: W/2, y: H - 110 };
+
+const THREATS = [
+  'CONFOUNDING VARIABLE', 'OUTLIER', 'SMALL COHORT n=12', 'SELECTION BIAS', 'p-HACKING'
+];
+const TREASURES = [
+  'LARGE COHORT n=7,700', 'LONG-TERM FOLLOW-UP', 'KAPLAN-MEIER', 'CLEAN DATA'
+];
+
+// ---------- STARS ----------
+const stars = Array.from({length:70}, () => ({
+  x: Math.random()*W, y: Math.random()*(H*0.55), r: Math.random()*1.5+0.5, p: Math.random()*6.28
+}));
+const constel = [
+  [60,50,140,80],[140,80,190,40],[540,60,610,100],[610,100,660,55],
+  [300,30,360,70],[360,70,430,45]
+];
+
+// ---------- BACKGROUND ----------
+function drawBg(){
+  ctx.fillStyle = PAL.night; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = PAL.nightHi; ctx.fillRect(0,H*0.38,W,H*0.2);
+  stars.forEach(s => {
+    const tw = reduced ? 0.8 : 0.5 + 0.5*Math.abs(Math.sin(t*0.03 + s.p));
+    ctx.globalAlpha = tw*0.9; ctx.fillStyle = PAL.star;
+    ctx.fillRect(s.x, s.y, s.r*2, s.r*2);
+  });
+  ctx.globalAlpha = 0.25; ctx.strokeStyle = PAL.goldHi; ctx.lineWidth = 1;
+  constel.forEach(c => { ctx.beginPath(); ctx.moveTo(c[0],c[1]); ctx.lineTo(c[2],c[3]); ctx.stroke(); });
+  ctx.globalAlpha = 1;
+  // moon
+  ctx.fillStyle = PAL.lavSoft; ctx.beginPath(); ctx.arc(640,64,22,0,7); ctx.fill();
+  ctx.fillStyle = PAL.nightHi; ctx.beginPath(); ctx.arc(648,58,18,0,7); ctx.fill();
+  drawCastle();
+  ctx.fillStyle = PAL.plumDeep; ctx.fillRect(0,H-52,W,52);
+  ctx.fillStyle = PAL.plum; ctx.fillRect(0,H-52,W,6);
+  if (flash > 0){
+    ctx.globalAlpha = flash/14 * 0.28; ctx.fillStyle = PAL.sick;
+    ctx.fillRect(0,0,W,H); ctx.globalAlpha = 1;
+  }
+}
+
+function castleTower(x, w, h, cap){
+  ctx.fillStyle = PAL.castle; ctx.fillRect(x, H-52-h, w, h);
+  ctx.fillStyle = PAL.castleDeep;
+  for(let i=0;i<w;i+=16){ ctx.fillRect(x+i, H-52-h-10, 10, 10); }
+  if(cap){
+    ctx.fillStyle = PAL.castleDeep;
+    ctx.beginPath(); ctx.moveTo(x-4,H-52-h); ctx.lineTo(x+w/2,H-52-h-34); ctx.lineTo(x+w+4,H-52-h); ctx.fill();
+    ctx.fillStyle = PAL.goldHi; ctx.fillRect(x+w/2-1, H-52-h-42, 2, 10);
+    ctx.fillRect(x+w/2+1, H-52-h-42, 8, 5);
+  }
+  ctx.fillStyle = PAL.gold;
+  for(let wy=H-52-h+18; wy<H-80; wy+=34){ ctx.fillRect(x+w/2-3, wy, 6, 9); }
+}
+function drawCastle(){
+  castleTower(60, 54, 180, true);
+  castleTower(150, 90, 130, false);
+  castleTower(500, 90, 140, false);
+  castleTower(606, 54, 195, true);
+  ctx.fillStyle = PAL.castle; ctx.fillRect(150, H-52-92, 440, 92);
+  ctx.fillStyle = PAL.castleDeep;
+  for(let i=150;i<590;i+=22){ ctx.fillRect(i, H-52-102, 14, 10); }
+  ctx.fillStyle = PAL.castleDeep; ctx.beginPath();
+  ctx.moveTo(340,H-52); ctx.lineTo(340,H-108); ctx.arc(370,H-108,30,Math.PI,0); ctx.lineTo(400,H-52); ctx.fill();
+}
+
+// ---------- HOARD ----------
+function drawHoard(){
+  const cx = HOARD.x, base = H-52;
+  const rows = [[110,10],[96,10],[80,10],[62,8],[44,8],[26,6]];
+  let y = base;
+  rows.forEach(([w,h],i) => {
+    y -= h;
+    ctx.fillStyle = i%2 ? PAL.gold : PAL.goldHi;
+    ctx.fillRect(cx-w, y, w*2, h);
+  });
+  const coinSpots = [[-70,-14],[-30,-30],[20,-22],[58,-12],[-8,-48],[36,-40],[-52,-36],[8,-8]];
+  coinSpots.forEach(([dx,dy],i) => {
+    const bad = i < corrupted*3; // corrupted coins spread visibly
+    ctx.fillStyle = bad ? PAL.sage : PAL.flame;
+    ctx.fillRect(cx+dx, base+dy, 8, 5);
+    ctx.fillStyle = bad ? PAL.sick : PAL.goldLo;
+    ctx.fillRect(cx+dx+1, base+dy+3, 6, 2);
+  });
+}
+
+// ---------- DRAGON ----------
+// Pixel map, facing LEFT. Legend:
+// . blank  D ink outline  P plum body  L lavender wing  M membrane shade
+// G gold belly  W eye white
+const BODY = [
+"......DD....DD................",
+".....DPPD..DPPD.........DD....",
+"....DPPPPPPPPPPD.......DLLD...",
+"...DPPeePPPPPPPPD.....DLLLD...",
+"...DPPeePPPPPPPPD....DLLLLD...",
+"...DPPPPPPPPPPPPD...DLLLLLD...",
+"....DPPPPPPPPPPD...DLLMLLLD...",
+".....DPPPPPPPD....DLLMMLLLD...",
+".....DPPPPPPD....DLLMMLLLLD...",
+"....DPPPPPPPPDD.DLLMMLLLLLD...",
+"...DPPPGGGGPPPPDDLLMMLLLLLD...",
+"..DPPGGGGGGPPPPPDDLLMMLLLDD...",
+"..DPGGGGGGGGPPPPPD.DLD.DLD....",
+".DPGGGGGGGGGPPPPPPD.D...D.....",
+".DPGGGGGGGGGPPPPPPPPPPD..DD...",
+".DPPGGGGGGGPPPPPPPPPPPDDDPPD..",
+"..DPPPPPPPPPPPPPPPPPPPPPPPD...",
+"...DDPPDDPPDDPPPPPPPPPDDDD....",
+"....DD..DD..DDDDDDDDD.........",
+];
+// Eye variants patch the 'ee' cells (rows 3-4, cols 5-6)
+const EYES = {
+  alert:    ['DW','DW'],   // pupil forward, white behind
+  sleep:    ['PP','DD'],   // closed lid
+  sheepish: ['DD','PP'],   // squeezed shut
+  fire:     ['DW','DW']
+};
+function buildMap(mood){
+  return BODY.map((row,r) => {
+    if (r===3 || r===4){
+      const e = EYES[mood][r-3];
+      return row.slice(0,5) + e[0] + e[1] + row.slice(7).replace(/e/g,'P');
+    }
+    return row;
+  });
+}
+const MAPS = { alert:buildMap('alert'), sleep:buildMap('sleep'), sheepish:buildMap('sheepish'), fire:buildMap('fire') };
+const DCOLOR = { D:PAL.ink, P:PAL.plum, L:PAL.lav, M:PAL.lavShade, G:PAL.gold, W:PAL.cream };
+const DSCALE = 4;
+const DW_ = BODY[0].length * DSCALE, DH_ = BODY.length * DSCALE;
+// Mouth in map space (facing left): snout tip around col 4, row 5
+const MOUTH_OFF_X = DW_/2 - 4*DSCALE; // distance from sprite center toward facing side
+const MOUTH_OFF_Y = 5.5*DSCALE;
+
+function dragonTop(){ return H - 118 - DH_; }
+function mouthPos(){
+  return { x: HOARD.x + face*MOUTH_OFF_X, y: dragonTop() + MOUTH_OFF_Y };
+}
+
+function drawDragon(){
+  const map = MAPS[dragonMood] || MAPS.alert;
+  const breathe = (dragonMood==='sleep' && !reduced) ? Math.sin(t*0.05)*2 : 0;
+  const dx = HOARD.x - DW_/2, dy = dragonTop() + breathe;
+  ctx.save();
+  if (face === 1){ ctx.translate(HOARD.x*2, 0); ctx.scale(-1,1); }
+  for(let r=0;r<map.length;r++){
+    for(let c=0;c<map[r].length;c++){
+      const ch = map[r][c];
+      if (ch==='.') continue;
+      ctx.fillStyle = DCOLOR[ch] || PAL.plum;
+      ctx.fillRect(dx + c*DSCALE, dy + r*DSCALE, DSCALE, DSCALE);
+    }
+  }
+  // sheepish blush + sweat drop
+  if (dragonMood==='sheepish'){
+    ctx.globalAlpha = 0.75; ctx.fillStyle = PAL.ember;
+    ctx.fillRect(dx+4*DSCALE, dy+5*DSCALE, 2*DSCALE, DSCALE);
+    ctx.fillRect(dx+9*DSCALE, dy+5*DSCALE, 2*DSCALE, DSCALE);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = PAL.lavSoft;
+    ctx.fillRect(dx+13*DSCALE, dy+2*DSCALE, DSCALE, 2*DSCALE);
+  }
+  // open ember mouth while firing
+  if (dragonMood==='fire'){
+    ctx.fillStyle = PAL.ember;
+    ctx.fillRect(dx+3*DSCALE, dy+5*DSCALE, 2*DSCALE, DSCALE);
+  }
+  ctx.restore();
+  // Zzz
+  if (dragonMood==='sleep'){
+    zzz.forEach(z => {
+      ctx.font = `${z.s}px VT323, monospace`; ctx.fillStyle = PAL.lavSoft; ctx.globalAlpha = z.a;
+      ctx.fillText('Z', z.x, z.y); ctx.globalAlpha = 1;
+    });
+  }
+}
+
+// ---------- FIRE ----------
+function breatheFire(target){
+  dragonMood = 'fire'; moodTimer = 18;
+  face = target.x < HOARD.x ? -1 : 1;
+  flames.push({ tx: target.x, ty: target.y, life: 16 });
+  fireCooldown = 14;
+}
+function drawFlames(){
+  const m = mouthPos();
+  flames.forEach(f => {
+    const steps = 12;
+    for(let i=1;i<=steps;i++){
+      const p = i/steps;
+      const spread = 3 + p*26;          // cone widens toward the target
+      const n = 1 + (p*3|0);            // more embers farther out
+      for(let k=0;k<n;k++){
+        const fx = m.x + (f.tx-m.x)*p + (Math.random()*2-1)*spread;
+        const fy = m.y + (f.ty-m.y)*p + (Math.random()*2-1)*spread;
+        const sz = Math.max(3, 11 - p*7);
+        ctx.fillStyle = p<0.3 ? PAL.flame : (Math.random()<0.5 ? PAL.emberHi : PAL.ember);
+        ctx.fillRect(fx, fy, sz, sz);
+      }
+    }
+    f.life--;
+  });
+  flames = flames.filter(f => f.life > 0);
+}
+
+// ---------- ITEMS (fly in arcs toward the hoard) ----------
+function spawnItem(){
+  const bad = Math.random() < 0.55;
+  const pool = bad ? THREATS : TREASURES;
+  const label = pool[Math.random()*pool.length|0];
+  ctx.font = '17px VT323, monospace';
+  const w = Math.max(56, ctx.measureText(label).width + 14);
+  const fromLeft = Math.random() < 0.5;
+  const sx = fromLeft ? -w/2 - 10 : W + w/2 + 10;
+  const sy = 50 + Math.random()*(H*0.42);
+  const tx = HOARD.x + (Math.random()*90 - 45);
+  const ty = H - 112;
+  const ax = (sx + tx)/2;                       // arc apex
+  const ay = Math.min(sy, ty) - (60 + Math.random()*70);
+  const dp = 0.0035 + Math.random()*0.0018;
+  items.push({ label, bad, w, sx, sy, ax, ay, tx, ty, p:0, dp, x:sx, y:sy, wob:Math.random()*6.28, hit:false });
+}
+function itemPos(it, p){
+  const q = 1-p;
+  return {
+    x: q*q*it.sx + 2*q*p*it.ax + p*p*it.tx,
+    y: q*q*it.sy + 2*q*p*it.ay + p*p*it.ty
+  };
+}
+function drawItem(it){
+  const bob = reduced ? 0 : Math.sin(t*0.06 + it.wob)*3;
+  const h = 26;
+  ctx.fillStyle = it.bad ? '#4A3050' : '#33452F';
+  ctx.fillRect(it.x-it.w/2-3, it.y-h/2-3+bob, it.w+6, h+6);
+  ctx.fillStyle = it.bad ? PAL.lavSoft : '#C9DCBB';
+  ctx.fillRect(it.x-it.w/2, it.y-h/2+bob, it.w, h);
+  ctx.fillStyle = it.bad ? PAL.plumDeep : '#2C3A28';
+  ctx.font = '17px VT323, monospace'; ctx.textAlign = 'center';
+  ctx.fillText(it.label, it.x, it.y+5+bob);
+  ctx.fillStyle = it.bad ? PAL.ember : PAL.sage;
+  ctx.fillRect(it.x-it.w/2-3, it.y-h/2-3+bob, 6, h+6);
+  ctx.textAlign = 'left';
+}
+
+// ---------- PARTICLES ----------
+function burst(x,y,color,n=12){
+  for(let i=0;i<n;i++) particles.push({
+    x, y, vx: Math.random()*4-2, vy: Math.random()*-3-0.5, life: 24, c: color
+  });
+}
+function drawParticles(){
+  particles.forEach(p => {
+    ctx.fillStyle = p.c; ctx.globalAlpha = p.life/24;
+    ctx.fillRect(p.x, p.y, 4, 4); ctx.globalAlpha = 1;
+    p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--;
+  });
+  particles = particles.filter(p => p.life > 0);
+}
+
+// ---------- GAME LOGIC ----------
+function torch(it){
+  if (it.hit || fireCooldown > 0) return;
+  it.hit = true;
+  breatheFire(it);
+  if (it.bad){
+    score += 50; burnedBad++;
+    burst(it.x, it.y, PAL.ember, 18);
+    burst(it.x, it.y, PAL.flame, 8);
+  } else {
+    score = Math.max(0, score - 40); singed++;
+    dragonMood = 'sheepish'; moodTimer = 45;
+    burst(it.x, it.y, PAL.lav, 14);
+  }
+}
+
+function nearestItem(){
+  let best = null, bd = 1e9;
+  items.forEach(it => {
+    if (it.hit) return;
+    const d = Math.hypot(it.x-HOARD.x, it.y-HOARD.y);
+    if (d < bd){ bd = d; best = it; }
+  });
+  return best;
+}
+
+function update(){
+  t++;
+  if (fireCooldown > 0) fireCooldown--;
+  if (flash > 0) flash--;
+
+  if (state === 'play'){
+    playT++;
+    speedMult = Math.min(2.4, 1 + playT/3200);
+    spawnTimer--;
+    if (spawnTimer <= 0){
+      spawnItem();
+      spawnTimer = Math.max(45, 115 - playT/50) / speedMult;
+    }
+    items.forEach(it => {
+      if (it.hit) return;
+      it.p += it.dp * speedMult;
+      const pos = itemPos(it, Math.min(1, it.p));
+      it.x = pos.x; it.y = pos.y;
+      if (it.p >= 1){
+        it.hit = true;
+        if (it.bad){
+          corrupted++; flash = 14;
+          burst(it.x, H-100, PAL.sage, 16);
+          if (corrupted >= 3) endGame();
+        } else {
+          score += 25; saved++;
+          burst(it.x, H-100, PAL.flame, 16);
+        }
+      }
+    });
+    items = items.filter(it => !it.hit);
+  }
+
+  if (moodTimer > 0){
+    moodTimer--;
+    if (moodTimer === 0) dragonMood = state==='play' ? 'alert' : 'sleep';
+  }
+
+  // Zzz while asleep (ambient — paused under reduced motion)
+  if (dragonMood === 'sleep' && !reduced && t % 50 === 0){
+    zzz.push({ x: HOARD.x+40, y: dragonTop()+10, s: 14+Math.random()*10, a: 1 });
+  }
+  if (!reduced){
+    zzz.forEach(z => { z.y -= 0.4; z.x += 0.2; z.a -= 0.008; });
+    zzz = zzz.filter(z => z.a > 0);
+  }
+}
+
+function render(){
+  drawBg();
+  drawHoard();
+  items.forEach(drawItem);
+  drawDragon();
+  drawFlames();
+  drawParticles();
+  document.getElementById('score').textContent = score;
+  document.getElementById('integrity').textContent = Math.round((1 - corrupted/3)*100);
+}
+
+function loop(){ update(); render(); requestAnimationFrame(loop); }
+loop();
+
+// ---------- STATE CONTROL ----------
+function startGame(){
+  state = 'play';
+  score = 0; corrupted = 0; burnedBad = 0; singed = 0; saved = 0;
+  items = []; particles = []; flames = []; zzz = [];
+  playT = 0; spawnTimer = 55; speedMult = 1; fireCooldown = 0; flash = 0;
+  dragonMood = 'alert'; moodTimer = 0; face = -1;
+  document.getElementById('startOverlay').classList.add('hidden');
+  document.getElementById('endOverlay').classList.add('hidden');
+}
+function endGame(){
+  state = 'over'; dragonMood = 'sleep'; moodTimer = 0; items = [];
+  const integ = Math.round((1 - corrupted/3)*100);
+  document.getElementById('endTitle').textContent =
+    corrupted >= 3 ? 'THE ARCHIVE IS COMPROMISED' : 'THE ARCHIVE ENDURES';
+  document.getElementById('endStats').innerHTML =
+    `Threats burned: ${burnedBad} &nbsp;&middot;&nbsp; Treasures landed: ${saved} &nbsp;&middot;&nbsp; Treasures singed: ${singed}<br>` +
+    `Final gold: ${score}<br>Integrity of the Archive: ${integ}%<br><br>` +
+    `<em>The dragon returns to sleep. The data keeps its promises.</em>`;
+  document.getElementById('endOverlay').classList.remove('hidden');
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+
+// ---------- INPUT ----------
+cv.addEventListener('pointerdown', e => {
+  if (state !== 'play') return;
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  const mx = (e.clientX - r.left) * (W / r.width);
+  const my = (e.clientY - r.top) * (H / r.height);
+  // prefer the item under the pointer, else the one nearest the hoard
+  let best = null, bd = 1e9;
+  items.forEach(it => {
+    if (it.hit) return;
+    const d = Math.hypot(it.x-mx, it.y-my);
+    if (d < 80 && d < bd){ bd = d; best = it; }
+  });
+  const target = best || nearestItem();
+  if (target) torch(target);
+});
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space'){
+    e.preventDefault();
+    if (state === 'play'){ const it = nearestItem(); if (it) torch(it); }
+    else startGame();
+  }
+});
+})();
+</script>
+</body>
+</html>
