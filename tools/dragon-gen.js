@@ -143,10 +143,11 @@ function makeAwake(eyes){
   drawWing(g,[33,32],[44,14],[[58,8],[62,20],[58,32]],[44,38]);
   // graceful neck and a refined head: small cranium, tapered snout
   strokeBez(g,[27,34],[24,24],[27,15],3.6,2.6,'P');
-  fillEllipse(g,29,11,5,4.2,'P');           // cranium
-  strokeBez(g,[26,11],[20,11.5],[15,13.5],2.4,1.1,'P'); // snout, sloping bridge
+  fillEllipse(g,29,11,5.5,4.6,'P');         // cranium
+  // horse-like muzzle: deep at the cheek, blunt rounded nose
+  strokeBez(g,[26,12],[21,12.5],[17,14],3.2,1.9,'P');
   fillEllipse(g,27,7,3,1.4,'R',c=>c==='P'); // brow highlight
-  fillEllipse(g,20,10.5,3,1,'R',c=>c==='P');// snout-bridge highlight
+  fillEllipse(g,21,10.5,3.5,1,'R',c=>c==='P'); // bridge highlight
   shadeEllipse(g,40,48,8,7.5);
   shadeEllipse(g,34,44,7,6.5);
   outlineSilhouette(g);
@@ -156,16 +157,18 @@ function makeAwake(eyes){
     if(g[y][x]==='G' && y%3===0) g[y][x]='H';
   horns(g,29,6);
   if(eyes==='shut'){
-    set(g,25,11,'K'); set(g,26,10,'K'); set(g,27,10,'K'); set(g,28,11,'K');
+    set(g,25,11,'K'); set(g,26,12,'K'); set(g,27,12,'K'); set(g,28,11,'K');
   } else {
-    set(g,26,10,'W'); set(g,27,10,'W');
-    set(g,26,11,'K'); set(g,27,11,'W');
-    set(g,25,9,'K'); set(g,26,9,'K');       // brow line over the eye
+    // big glossy eye: dark with a white sparkle, chibi-style
+    set(g,26,9,'K');  set(g,27,9,'K');
+    set(g,26,10,'K'); set(g,27,10,'K');
+    set(g,26,11,'K'); set(g,27,11,'K');
+    set(g,27,9,'W');
   }
-  set(g,15,13,'K');                          // nostril at the snout tip
-  set(g,16,15,'K'); set(g,18,15,'K');        // mouth line
+  set(g,17,13,'K');                          // nostril on the blunt nose
+  set(g,18,16,'K'); set(g,20,16,'K');        // mouth line
   if(eyes==='fire'){                         // parted jaw
-    set(g,13,15,'K'); set(g,14,15,'K'); set(g,15,15,'K'); set(g,14,16,'K');
+    set(g,15,16,'K'); set(g,16,16,'K'); set(g,17,16,'K'); set(g,16,17,'K');
   }
   return g;
 }
