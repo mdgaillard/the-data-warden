@@ -111,6 +111,12 @@ function goldBands(g){
     if(g[y][x]==='G' && y%3===0) g[y][x]='H';
 }
 
+function speckle(g){
+  // sparse lighter scale flecks across the plum body (as in the reference art)
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++)
+    if(g[y][x]==='P' && (x*7 + y*13) % 41 === 0) g[y][x]='R';
+}
+
 function hornsSwept(g,hx,hy){
   // two small gold horns swept back from the crown
   strokeBez(g,[hx,hy],[hx+3,hy-2],[hx+5,hy-4],1.2,0.4,'H');
@@ -135,7 +141,9 @@ function makeAwake(eyes){
   fillEllipse(g,27,10,6,4.6,'P');                   // cranium
   strokeBez(g,[23,10.5],[19,10.5],[15,12],3,1.9,'P'); // blunt, gently drooping snout
   strokeBez(g,[24,38],[18,26],[22,13],2.4,1.7,'G',c=>c==='P'); // gold throat
+  strokeBez(g,[44,56],[28,64],[13,56],1.3,0.7,'G',c=>c==='P'); // gold tail underside
   shadeEllipse(g,34,46,13,12);
+  speckle(g);
   outlineSilhouette(g);
   seam(g,'L','P'); seam(g,'M','P');
   goldBands(g);
@@ -170,7 +178,9 @@ function makeSleep(){
   strokeBez(g,[11,44],[8,46],[6,49],2.8,1.6,'P');   // snout drooping toward the pile
   fillEllipse(g,19,51,6,5.5,'P');                   // chest under the chin
   fillEllipse(g,18,51,5.5,5,'G',c=>c==='P');        // gold chest bib
+  strokeBez(g,[52,56],[42,65],[23,61],1.3,0.7,'G',c=>c==='P'); // gold tail underside
   shadeEllipse(g,38,48,15,10.5);
+  speckle(g);
   outlineSilhouette(g);
   seam(g,'L','P'); seam(g,'M','P');
   goldBands(g);
