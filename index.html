@@ -50,6 +50,10 @@
   .overlay.start { background:none; justify-content:space-between; pointer-events:none; padding:26px 20px 6px; }
   .overlay.start h1, .overlay.start p { text-shadow: 0 2px 10px rgba(20,12,32,.9), 0 0 3px rgba(20,12,32,.9); }
   .overlay.start .startTop { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .overlay.start p { max-width:620px; }
+  .overlay.start .lore { color:#D4BC85; font-size:18px; }
+  .overlay.start .how { font-size:16px; color:#A99BB8; }
+  .overlay.start h1 { font-size:38px; }
   .overlay.start button { pointer-events:auto; background:rgba(61,44,69,.92); }
   .hidden { display:none; }
   #tagline { margin-top:8px; font-size:16px; color:#6B5B7A; letter-spacing:2px; text-align:center; }
@@ -67,7 +71,8 @@
     <div class="overlay start" id="startOverlay">
       <div class="startTop">
         <h1>THE DATA WARDEN</h1>
-        <p>Torch the threats before they reach the hoard &mdash; click, tap, or SPACE.<br>Survive the night to save the archive.</p>
+        <p class="lore">Quill the dragon protects a registry hoard of priceless knowledge.<br>Protect these treasured insights so that the realm&rsquo;s secrets and wonders may be revealed.</p>
+        <p class="how">Torch the threats before they reach the hoard &mdash; click, tap, or SPACE.<br>Survive the night to save the archive.</p>
         <p class="best" id="bestLine"></p>
       </div>
       <button id="startBtn">WAKE THE WARDEN</button>
@@ -125,10 +130,11 @@ const NIGHT_LEN = 9000;             // frames (~2.5 min): survive the night to w
 const HOARD = { x: W/2, y: H - 110 };
 
 const THREATS = [
-  'CONFOUNDING VARIABLE', 'OUTLIER', 'SMALL COHORT n=12', 'SELECTION BIAS', 'p-HACKING'
+  'DUPLICATE RECORD', 'MISSING DATA', 'SURVIVOR BIAS', 'CONFOUNDING VARIABLES',
+  'SELECTION BIAS', 'p-HACKING', 'MEASUREMENT ERROR'
 ];
 const TREASURES = [
-  'LARGE COHORT n=7,700', 'LONG-TERM FOLLOW-UP', 'KAPLAN-MEIER', 'CLEAN DATA'
+  'LONGITUDINAL DATA', 'LARGE COHORT', 'CONSISTENT PROTOCOL', 'STANDARDIZED'
 ];
 
 // ---------- STARS ----------
@@ -196,8 +202,9 @@ function drawCastle(){
   castleTower(150, 90, 130, false);
   castleTower(500, 90, 140, false);
   castleTower(606, 54, 195, true);
-  ctx.fillStyle = PAL.castle; ctx.fillRect(150, H-52-92, 440, 92);
-  for(let i=150;i<590;i+=22){ ctx.fillRect(i, H-52-102, 14, 10); }
+  // curtain wall runs tower to tower, joining the outer towers to the keep
+  ctx.fillStyle = PAL.castle; ctx.fillRect(114, H-52-92, 492, 92);
+  for(let i=118;i<602;i+=22){ ctx.fillRect(i, H-52-102, 14, 10); }
   ctx.fillStyle = PAL.castleDeep; ctx.beginPath();
   ctx.moveTo(340,H-52); ctx.lineTo(340,H-108); ctx.arc(370,H-108,30,Math.PI,0); ctx.lineTo(400,H-52); ctx.fill();
 }
@@ -890,8 +897,8 @@ function endGame(win){
     `Items screened: ${screened} &nbsp;&middot;&nbsp; Threats burned: ${burnedBad}<br>` +
     `Treasures archived: ${saved} &nbsp;&middot;&nbsp; Treasures singed: ${singed}<br>` +
     `Gold: ${score}${isBest ? ' &nbsp;&#10022; new best' : ''} &nbsp;&middot;&nbsp; Integrity of the Archive: ${integ}%<br><br>` +
-    (win ? `<em>Dawn breaks. The dragon returns to sleep. The data keeps its promises.</em>`
-         : `<em>Too many threats slipped in. The dragon will guard better tomorrow.</em>`);
+    (win ? `<em>You are a worthy guardian of the data. The realm advances.</em>`
+         : `<em>The data is corrupted. Inconsistency and error prevail.</em>`);
   document.getElementById('endOverlay').classList.remove('hidden');
 }
 
