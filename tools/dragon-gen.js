@@ -122,34 +122,50 @@ function horns(g,hx,hy){
 // ---------------- poses ----------------
 function makeAwake(eyes){
   const g=newGrid();
-  // thick tail sweeping up the right side, barb pointing up (ref pose)
-  strokeBez(g,[44,52],[61,58],[56,38],4.5,2,'P');
-  fillTri(g,[57,31],[52,38],[62,38],'P');
-  // pear body + short thick neck
-  fillEllipse(g,35,44,13,12,'P');
-  fillEllipse(g,36,52,15,8,'P');
-  fillEllipse(g,28,28,7,7,'P');            // neck bridge into the head
-  // front paws
-  fillEllipse(g,24,58,4,2.5,'P'); fillEllipse(g,32,59,4,2.5,'P');
-  // gold belly down the front
-  fillEllipse(g,27,44,7,12,'G',c=>c==='P');
-  drawWing(g,[40,30],[48,18],[[58,12],[61,22],[56,31]],[46,36]);
-  bigHead(g,23,16,12,21);
-  shadeEllipse(g,35,44,13,12);
-  shadeEllipse(g,36,52,15,8);
+  // long slim tail, S-curving up the right side with a small barb
+  strokeBez(g,[42,52],[60,60],[57,40],2.8,1.2,'P');
+  fillTri(g,[58,34],[54,41],[61,41],'P');
+  // slim body: upright chest tapering into the haunch (baby-dragon build)
+  fillEllipse(g,40,48,8,7.5,'P');           // haunch
+  fillEllipse(g,34,44,7,6.5,'P');           // midriff bridge
+  fillEllipse(g,28,38,6.5,8,'P');           // chest
+  // slender front legs (near leg plum, far leg in shade)
+  line(g,[30,45],[31,56],1.4,'Q');
+  fillEllipse(g,31,57,3,2,'Q');
+  line(g,[26,43],[24,56],1.7,'P');
+  fillEllipse(g,24,57,3.2,2.2,'P');
+  set(g,21,58,'K'); set(g,22,58,'K');       // front claws
+  fillEllipse(g,44,57,4,2.4,'P');           // hind foot
+  set(g,40,58,'K'); set(g,41,58,'K');
+  // narrow gold belly strip down the chest
+  strokeBez(g,[24,32],[21,40],[26,49],2,2.6,'G',c=>c==='P');
+  // large webbed wing swept up and back
+  drawWing(g,[33,32],[44,14],[[58,8],[62,20],[58,32]],[44,38]);
+  // graceful neck and a refined head: small cranium, tapered snout
+  strokeBez(g,[27,34],[24,24],[27,15],3.6,2.6,'P');
+  fillEllipse(g,29,11,5,4.2,'P');           // cranium
+  strokeBez(g,[26,11],[20,11.5],[15,13.5],2.4,1.1,'P'); // snout, sloping bridge
+  fillEllipse(g,27,7,3,1.4,'R',c=>c==='P'); // brow highlight
+  fillEllipse(g,20,10.5,3,1,'R',c=>c==='P');// snout-bridge highlight
+  shadeEllipse(g,40,48,8,7.5);
+  shadeEllipse(g,34,44,7,6.5);
   outlineSilhouette(g);
   seam(g,'L','P'); seam(g,'M','P');
-  horns(g,23,8);
+  // gold scale banding on the belly strip
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++)
+    if(g[y][x]==='G' && y%3===0) g[y][x]='H';
+  horns(g,29,6);
   if(eyes==='shut'){
-    set(g,17,15,'K'); set(g,18,14,'K'); set(g,19,14,'K'); set(g,20,15,'K');
+    set(g,25,11,'K'); set(g,26,10,'K'); set(g,27,10,'K'); set(g,28,11,'K');
   } else {
-    set(g,18,14,'W'); set(g,19,14,'W');
-    set(g,18,15,'K'); set(g,19,15,'W');
+    set(g,26,10,'W'); set(g,27,10,'W');
+    set(g,26,11,'K'); set(g,27,11,'W');
+    set(g,25,9,'K'); set(g,26,9,'K');       // brow line over the eye
   }
-  set(g,8,20,'K');                          // nostril
-  set(g,8,23,'K'); set(g,9,23,'K');         // mouth crease
-  if(eyes==='fire'){                        // parted jaw
-    set(g,6,24,'K'); set(g,7,24,'K'); set(g,8,24,'K'); set(g,7,25,'K');
+  set(g,15,13,'K');                          // nostril at the snout tip
+  set(g,16,15,'K'); set(g,18,15,'K');        // mouth line
+  if(eyes==='fire'){                         // parted jaw
+    set(g,13,15,'K'); set(g,14,15,'K'); set(g,15,15,'K'); set(g,14,16,'K');
   }
   return g;
 }
