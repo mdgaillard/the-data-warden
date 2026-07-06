@@ -88,110 +88,96 @@ function spikesAlong(g,p0,p1,p2,ts,sign,r0,r1){
   });
 }
 
-// ---------------- shared anatomy (chunky reference form) ----------------
-function drawWing(g,S,hand,tips,B){
-  // webbed wing: shade membrane, brighter core, scalloped edge, ink finger spines
-  const triset=[[hand,tips[0],tips[1]],[hand,tips[1],tips[2]],[hand,tips[2],B],[S,hand,B]];
-  triset.forEach(([a,b,c])=>fillTri(g,a,b,c,'M'));
-  const pull=(p,f)=>[hand[0]+(p[0]-hand[0])*f, hand[1]+(p[1]-hand[1])*f];
-  triset.forEach(([a,b,c])=>fillTri(g,pull(a,0.68),pull(b,0.68),pull(c,0.68),'L',cc=>cc==='M'));
-  for(let i=0;i<tips.length-1;i++){
-    const mx=(tips[i][0]+tips[i+1][0])/2, my=(tips[i][1]+tips[i+1][1])/2;
-    const dx=mx-hand[0], dy=my-hand[1], dl=Math.hypot(dx,dy);
-    fillEllipse(g,mx+dx/dl*2.8,my+dy/dl*2.8,3.6,3.6,'.',c=>c==='L'||c==='M');
-  }
-  strokeBez(g,S,[(S[0]+hand[0])/2,(S[1]+hand[1])/2-2],hand,1.8,1.2,'P');
-  tips.forEach(tip=>{
-    line(g,hand,tip,0.8,'K',c=>c==='L'||c==='M'||c==='.');
-    set(g,tip[0],tip[1],'H');
+// ---------------- shared anatomy (draped-wing reference form) ----------------
+function drapedWing(g,cx,cy,rx,ry,arm){
+  // wing folded over the back like a cloak: shaded membrane, brighter core,
+  // scalloped hem, panel ribs, plum arm ridge along the top
+  fillEllipse(g,cx,cy,rx,ry,'M');
+  fillEllipse(g,cx-1,cy-2,rx*0.85,ry*0.75,'L',c=>c==='M');
+  [-0.6,0,0.6].forEach(f=>{
+    fillEllipse(g,cx+f*rx, cy+ry-0.5, 3.4,3.4,'.',c=>c==='L'||c==='M');
   });
+  // panel ribs fanning from the wing shoulder (top-front) to the hem
+  const apex=[cx-rx*0.55, cy-ry*0.45];
+  [[cx-rx*0.55,cy+ry-2],[cx+rx*0.1,cy+ry-1],[cx+rx*0.65,cy+ry*0.45]].forEach(p=>{
+    line(g,apex,p,0.6,'K',c=>c==='L'||c==='M');
+  });
+  strokeBez(g,arm[0],arm[1],arm[2],1.8,1.2,'P');
+  set(g,arm[2][0],arm[2][1]-2,'H'); // thumb claw at the wing wrist
 }
 
-function bigHead(g,cx,cy,mzx,mzy){
-  fillEllipse(g,cx,cy,9,8,'P');            // cranium — big, cute
-  fillEllipse(g,mzx,mzy,6,4.5,'P');        // prominent rounded muzzle
-  fillEllipse(g,mzx+2,mzy-1,4,2,'R',c=>c==='P'); // muzzle-top highlight
+function goldBands(g){
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++)
+    if(g[y][x]==='G' && y%3===0) g[y][x]='H';
 }
 
-function horns(g,hx,hy){
-  [[hx-3,hy],[hx,hy-1],[hx+3,hy]].forEach(([x,y])=>{
-    set(g,x,y-2,'H'); set(g,x,y-1,'H'); set(g,x,y,'G');
-  });
+function hornsSwept(g,hx,hy){
+  // two small gold horns swept back from the crown
+  strokeBez(g,[hx,hy],[hx+3,hy-2],[hx+5,hy-4],1.2,0.4,'H');
+  strokeBez(g,[hx+1,hy+2],[hx+4,hy],[hx+6,hy-1],0.9,0.3,'G');
 }
 
 // ---------------- poses ----------------
 function makeAwake(eyes){
   const g=newGrid();
-  // long slim tail, S-curving up the right side with a small barb
-  strokeBez(g,[42,52],[60,60],[57,40],2.8,1.2,'P');
-  fillTri(g,[58,34],[54,41],[61,41],'P');
-  // slim body: upright chest tapering into the haunch (baby-dragon build)
-  fillEllipse(g,40,48,8,7.5,'P');           // haunch
-  fillEllipse(g,34,44,7,6.5,'P');           // midriff bridge
-  fillEllipse(g,28,38,6.5,8,'P');           // chest
-  // slender front legs (near leg plum, far leg in shade)
-  line(g,[30,45],[31,56],1.4,'Q');
-  fillEllipse(g,31,57,3,2,'Q');
-  line(g,[26,43],[24,56],1.7,'P');
-  fillEllipse(g,24,57,3.2,2.2,'P');
-  set(g,21,58,'K'); set(g,22,58,'K');       // front claws
-  fillEllipse(g,44,57,4,2.4,'P');           // hind foot
-  set(g,40,58,'K'); set(g,41,58,'K');
-  // narrow gold belly strip down the chest
-  strokeBez(g,[24,32],[21,40],[26,49],2,2.6,'G',c=>c==='P');
-  // large webbed wing swept up and back
-  drawWing(g,[33,32],[44,14],[[58,8],[62,20],[58,32]],[44,38]);
-  // graceful neck and a refined head: small cranium, tapered snout
-  strokeBez(g,[27,34],[24,24],[27,15],3.6,2.6,'P');
-  fillEllipse(g,29,11,5.5,4.6,'P');         // cranium
-  // horse-like muzzle: deep at the cheek, blunt rounded nose
-  strokeBez(g,[26,12],[21,12.5],[17,14],3.2,1.9,'P');
-  fillEllipse(g,27,7,3,1.4,'R',c=>c==='P'); // brow highlight
-  fillEllipse(g,21,10.5,3.5,1,'R',c=>c==='P'); // bridge highlight
-  shadeEllipse(g,40,48,8,7.5);
-  shadeEllipse(g,34,44,7,6.5);
+  // thick tail curling around the front base
+  strokeBez(g,[44,54],[28,63],[12,54],4,2.2,'P');
+  fillEllipse(g,11,52,2.4,2.4,'P');
+  // seated body
+  fillEllipse(g,34,46,13,12,'P');
+  fillEllipse(g,40,50,10,8,'P');
+  // front paw peeking below the chest
+  fillEllipse(g,24,56,4,2.5,'P');
+  set(g,21,57,'K'); set(g,22,57,'K');
+  // draped wing over the back, then the neck and head in front of it
+  drapedWing(g,40,36,12,14,[[31,27],[40,21],[50,28]]);
+  strokeBez(g,[28,40],[22,26],[26,13],5,3.4,'P');   // tall arched neck
+  fillEllipse(g,27,10,6,4.6,'P');                   // cranium
+  strokeBez(g,[23,10.5],[19,10.5],[15,12],3,1.9,'P'); // blunt, gently drooping snout
+  strokeBez(g,[24,38],[18,26],[22,13],2.4,1.7,'G',c=>c==='P'); // gold throat
+  shadeEllipse(g,34,46,13,12);
   outlineSilhouette(g);
   seam(g,'L','P'); seam(g,'M','P');
-  // gold scale banding on the belly strip
-  for(let y=0;y<N;y++) for(let x=0;x<N;x++)
-    if(g[y][x]==='G' && y%3===0) g[y][x]='H';
-  horns(g,29,6);
+  goldBands(g);
+  hornsSwept(g,29,7);
   if(eyes==='shut'){
-    set(g,25,11,'K'); set(g,26,12,'K'); set(g,27,12,'K'); set(g,28,11,'K');
+    set(g,22,10,'K'); set(g,23,11,'K'); set(g,24,11,'K'); set(g,25,10,'K');
   } else {
-    // big glossy eye: dark with a white sparkle, chibi-style
-    set(g,26,9,'K');  set(g,27,9,'K');
-    set(g,26,10,'K'); set(g,27,10,'K');
-    set(g,26,11,'K'); set(g,27,11,'K');
-    set(g,27,9,'W');
+    // big glossy eye with a sparkle
+    set(g,23,9,'K');  set(g,24,9,'K');
+    set(g,23,10,'K'); set(g,24,10,'K');
+    set(g,23,11,'K'); set(g,24,11,'K');
+    set(g,24,9,'W');
   }
-  set(g,17,13,'K');                          // nostril on the blunt nose
-  set(g,18,16,'K'); set(g,20,16,'K');        // mouth line
-  if(eyes==='fire'){                         // parted jaw
-    set(g,15,16,'K'); set(g,16,16,'K'); set(g,17,16,'K'); set(g,16,17,'K');
+  set(g,14,11,'K');                        // nostril
+  set(g,15,14,'K'); set(g,17,14,'K');      // mouth line
+  if(eyes==='fire'){                       // parted jaw
+    set(g,13,14,'K'); set(g,14,14,'K'); set(g,15,14,'K'); set(g,14,15,'K');
   }
   return g;
 }
 
 function makeSleep(){
   const g=newGrid();
-  // tail wraps around the front, barb resting near the head
+  // tail wraps around the front of the pile
   strokeBez(g,[52,54],[42,63],[22,59],4.5,2,'P');
-  fillTri(g,[19,53],[15,59],[23,59],'P');
-  // curled mound body + neck bridge
-  fillEllipse(g,38,47,15,11,'P');
-  fillEllipse(g,26,46,6,6,'P');
-  // small gold chest peeking under the chin
-  fillEllipse(g,27,52,5,4,'G',c=>c==='P');
-  drawWing(g,[36,38],[43,27],[[51,21],[54,29],[50,36]],[42,42]);
-  bigHead(g,17,45,8,49);                    // head resting low
-  shadeEllipse(g,38,47,15,11);
+  fillEllipse(g,20,57,2.4,2.4,'P');
+  // curled mound + low arched neck, head sinking to the gold
+  fillEllipse(g,38,48,15,10.5,'P');
+  drapedWing(g,39,38,12,11,[[29,32],[38,26],[49,32]]);
+  strokeBez(g,[28,42],[19,36],[15,42],4.5,3.6,'P');
+  fillEllipse(g,15,43,6.5,5,'P');
+  strokeBez(g,[11,44],[8,46],[6,49],2.8,1.6,'P');   // snout drooping toward the pile
+  fillEllipse(g,19,51,6,5.5,'P');                   // chest under the chin
+  fillEllipse(g,18,51,5.5,5,'G',c=>c==='P');        // gold chest bib
+  shadeEllipse(g,38,48,15,10.5);
   outlineSilhouette(g);
   seam(g,'L','P'); seam(g,'M','P');
-  horns(g,17,37);
+  goldBands(g);
+  hornsSwept(g,16,39);
   // closed contented eye
-  set(g,13,44,'K'); set(g,14,45,'K'); set(g,15,45,'K'); set(g,16,44,'K');
-  set(g,4,48,'K');                          // nostril
+  set(g,12,42,'K'); set(g,13,43,'K'); set(g,14,43,'K'); set(g,15,42,'K');
+  set(g,5,48,'K');                                   // nostril
   return g;
 }
 
