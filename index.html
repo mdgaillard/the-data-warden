@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The Data Warden</title>
+<meta name="theme-color" content="#1E1530">
+<meta property="og:title" content="The Data Warden">
+<meta property="og:description" content="A pixel dragon guards nineteen years of clean data. Torch the threats. Let the treasures land.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128009;</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -19,6 +23,8 @@
   }
   #hud .gold { color:#D4BC85; }
   #hud .integrity { color:#A99BB8; }
+  #muteBtn { background:none; border:none; font-size:18px; cursor:pointer; line-height:1; }
+  .overlay .best { font-size:16px; color:#B08D3E; letter-spacing:2px; }
   #stage { display:flex; flex-direction:column; align-items:center; }
   #wrap { position:relative; }
   canvas {
@@ -54,13 +60,15 @@
   <div id="hud">
     <span class="gold">GOLD: <span id="score">0</span></span>
     <span class="integrity">INTEGRITY OF THE ARCHIVE: <span id="integrity">100</span>%</span>
+    <button id="muteBtn" title="Sound on/off (M)">&#128266;</button>
   </div>
   <div id="wrap">
     <canvas id="game" width="720" height="480"></canvas>
     <div class="overlay start" id="startOverlay">
       <div class="startTop">
         <h1>THE DATA WARDEN</h1>
-        <p>Torch the threats before they reach the hoard &mdash; click, tap, or SPACE.</p>
+        <p>Torch the threats before they reach the hoard &mdash; click, tap, or SPACE.<br>Survive the night to save the archive.</p>
+        <p class="best" id="bestLine"></p>
       </div>
       <button id="startBtn">WAKE THE WARDEN</button>
     </div>
@@ -112,6 +120,8 @@ let items = [], flames = [], particles = [], zzz = [];
 let t = 0, playT = 0, spawnTimer = 0, speedMult = 1;
 let dragonMood = 'sleep'; // sleep | alert | fire | sheepish
 let moodTimer = 0, face = -1, fireCooldown = 0, flash = 0;
+let paused = false, pending = null; // queued shot while the fire recharges
+const NIGHT_LEN = 9000;             // frames (~2.5 min): survive the night to win
 const HOARD = { x: W/2, y: H - 110 };
 
 const THREATS = [
@@ -131,20 +141,35 @@ const constel = [
 ];
 
 // ---------- BACKGROUND ----------
+function dawnProgress(){ return state==='play' ? Math.min(1, playT/NIGHT_LEN) : 0; }
+function lerpC(a,b,f){
+  const pa = parseInt(a.slice(1),16), pb = parseInt(b.slice(1),16);
+  const r  = ((pa>>16)      + (((pb>>16)      - (pa>>16))*f))      | 0;
+  const g  = (((pa>>8)&255) + ((((pb>>8)&255) - ((pa>>8)&255))*f)) | 0;
+  const bl = ((pa&255)      + (((pb&255)      - (pa&255))*f))      | 0;
+  return `rgb(${r},${g},${bl})`;
+}
 function drawBg(){
-  ctx.fillStyle = PAL.night; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle = PAL.nightHi; ctx.fillRect(0,H*0.38,W,H*0.2);
+  const dawn = dawnProgress();
+  ctx.fillStyle = lerpC(PAL.night,'#43336A',dawn*0.9); ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = lerpC(PAL.nightHi,'#584680',dawn*0.9); ctx.fillRect(0,H*0.38,W,H*0.2);
   stars.forEach(s => {
     const tw = reduced ? 0.8 : 0.5 + 0.5*Math.abs(Math.sin(t*0.03 + s.p));
-    ctx.globalAlpha = tw*0.9; ctx.fillStyle = PAL.star;
+    ctx.globalAlpha = tw*0.9*(1-dawn*0.65); ctx.fillStyle = PAL.star;
     ctx.fillRect(s.x, s.y, s.r*2, s.r*2);
   });
-  ctx.globalAlpha = 0.25; ctx.strokeStyle = PAL.goldHi; ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.25*(1-dawn*0.6); ctx.strokeStyle = PAL.goldHi; ctx.lineWidth = 1;
   constel.forEach(c => { ctx.beginPath(); ctx.moveTo(c[0],c[1]); ctx.lineTo(c[2],c[3]); ctx.stroke(); });
   ctx.globalAlpha = 1;
-  // moon
-  ctx.fillStyle = PAL.lavSoft; ctx.beginPath(); ctx.arc(640,64,22,0,7); ctx.fill();
-  ctx.fillStyle = PAL.nightHi; ctx.beginPath(); ctx.arc(648,58,18,0,7); ctx.fill();
+  // moon sinks toward the horizon as dawn nears
+  const mx = 640 - 540*dawn, my = 64 + 26*dawn;
+  ctx.fillStyle = PAL.lavSoft; ctx.beginPath(); ctx.arc(mx,my,22,0,7); ctx.fill();
+  ctx.fillStyle = lerpC(PAL.night,'#43336A',dawn*0.9); ctx.beginPath(); ctx.arc(mx+8,my-6,18,0,7); ctx.fill();
+  // first light behind the castle
+  if (dawn > 0.55){
+    ctx.globalAlpha = (dawn-0.55)/0.45*0.30; ctx.fillStyle = PAL.emberHi;
+    ctx.fillRect(0, H*0.5, W, H-52-H*0.5); ctx.globalAlpha = 1;
+  }
   drawCastle();
   ctx.fillStyle = PAL.plumDeep; ctx.fillRect(0,H-52,W,52);
   ctx.fillStyle = PAL.plum; ctx.fillRect(0,H-52,W,6);
@@ -596,9 +621,11 @@ function drawFlames(){
 
 // ---------- ITEMS (fly in arcs toward the hoard) ----------
 function spawnItem(){
-  const bad = Math.random() < 0.55;
+  const bias = 0.45 + 0.25*Math.min(1, playT/NIGHT_LEN); // threats thicken toward dawn
+  const bad = Math.random() < bias;
+  const golden = !bad && Math.random() < 0.07;            // rare high-value treasure
   const pool = bad ? THREATS : TREASURES;
-  const label = pool[Math.random()*pool.length|0];
+  const label = golden ? 'PEER REVIEW' : pool[Math.random()*pool.length|0];
   ctx.font = '17px VT323, monospace';
   const w = Math.max(56, ctx.measureText(label).width + 14);
   const fromLeft = Math.random() < 0.5;
@@ -609,7 +636,7 @@ function spawnItem(){
   const ax = (sx + tx)/2;                       // arc apex
   const ay = Math.min(sy, ty) - (60 + Math.random()*70);
   const dp = 0.0035 + Math.random()*0.0018;
-  items.push({ label, bad, w, sx, sy, ax, ay, tx, ty, p:0, dp, x:sx, y:sy, wob:Math.random()*6.28, hit:false });
+  items.push({ label, bad, golden, w, sx, sy, ax, ay, tx, ty, p:0, dp, x:sx, y:sy, wob:Math.random()*6.28, hit:false });
 }
 function itemPos(it, p){
   const q = 1-p;
@@ -621,15 +648,24 @@ function itemPos(it, p){
 function drawItem(it){
   const bob = reduced ? 0 : Math.sin(t*0.06 + it.wob)*3;
   const h = 26;
-  ctx.fillStyle = it.bad ? '#4A3050' : '#33452F';
-  ctx.fillRect(it.x-it.w/2-3, it.y-h/2-3+bob, it.w+6, h+6);
-  ctx.fillStyle = it.bad ? PAL.lavSoft : '#C9DCBB';
+  const bx = it.x-it.w/2-3, by = it.y-h/2-3+bob;
+  ctx.fillStyle = it.golden ? PAL.goldLo : (it.bad ? '#4A3050' : '#33452F');
+  ctx.fillRect(bx, by, it.w+6, h+6);
+  ctx.fillStyle = it.golden ? PAL.goldHi : (it.bad ? PAL.lavSoft : '#C9DCBB');
   ctx.fillRect(it.x-it.w/2, it.y-h/2+bob, it.w, h);
   ctx.fillStyle = it.bad ? PAL.plumDeep : '#2C3A28';
   ctx.font = '17px VT323, monospace'; ctx.textAlign = 'center';
   ctx.fillText(it.label, it.x, it.y+5+bob);
-  ctx.fillStyle = it.bad ? PAL.ember : PAL.sage;
-  ctx.fillRect(it.x-it.w/2-3, it.y-h/2-3+bob, 6, h+6);
+  // marker bar; threats get hazard dashes, treasures a seal dot (hue-independent cues)
+  ctx.fillStyle = it.golden ? PAL.flame : (it.bad ? PAL.ember : PAL.sage);
+  ctx.fillRect(bx, by, 6, h+6);
+  if (it.bad){
+    ctx.fillStyle = PAL.ink;
+    ctx.fillRect(bx, by+7, 6, 4); ctx.fillRect(bx, by+h-5, 6, 4);
+  } else {
+    ctx.fillStyle = PAL.cream;
+    ctx.fillRect(bx+1, by+(h+6)/2-2, 4, 4);
+  }
   ctx.textAlign = 'left';
 }
 
@@ -648,11 +684,66 @@ function drawParticles(){
   particles = particles.filter(p => p.life > 0);
 }
 
+// ---------- AUDIO (tiny WebAudio synth, no files) ----------
+let AC = null, muted = false;
+try { muted = localStorage.getItem('dw-mute') === '1'; } catch(e){}
+function audioCtx(){
+  if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+  if (AC.state === 'suspended') AC.resume();
+  return AC;
+}
+function tone(freq, dur, type, vol, when=0, slide=0){
+  const a = audioCtx(), o = a.createOscillator(), g = a.createGain();
+  const t0 = a.currentTime + when;
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq+slide), t0+dur);
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0+dur);
+  o.connect(g); g.connect(a.destination);
+  o.start(t0); o.stop(t0+dur+0.02);
+}
+function noiseHit(dur, vol, freq){
+  const a = audioCtx(), len = a.sampleRate*dur|0, buf = a.createBuffer(1, len, a.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = (Math.random()*2-1)*(1-i/len);
+  const src = a.createBufferSource(); src.buffer = buf;
+  const f = a.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq;
+  const g = a.createGain(); g.gain.value = vol;
+  src.connect(f); f.connect(g); g.connect(a.destination); src.start();
+}
+function sfx(kind){
+  if (muted) return;
+  try {
+    if (kind==='fire'){ noiseHit(0.18, 0.5, 900); tone(160, 0.15, 'sawtooth', 0.05, 0, -60); }
+    else if (kind==='coin'){ tone(880, 0.09, 'square', 0.045); tone(1318, 0.12, 'square', 0.045, 0.07); }
+    else if (kind==='gold'){ tone(660, 0.08, 'square', 0.05); tone(880, 0.08, 'square', 0.05, 0.06); tone(1318, 0.14, 'square', 0.05, 0.12); }
+    else if (kind==='singe'){ tone(420, 0.18, 'triangle', 0.07, 0, -220); }
+    else if (kind==='bad'){ tone(120, 0.3, 'sawtooth', 0.09, 0, -60); noiseHit(0.2, 0.25, 220); }
+    else if (kind==='win'){ [523,659,784,1046].forEach((f,i)=>tone(f, 0.18, 'triangle', 0.07, i*0.13)); }
+    else if (kind==='lose'){ [330,247,175].forEach((f,i)=>tone(f, 0.25, 'triangle', 0.08, i*0.18)); }
+  } catch(e){}
+}
+function setMuted(m){
+  muted = m;
+  try { localStorage.setItem('dw-mute', m ? '1' : '0'); } catch(e){}
+  document.getElementById('muteBtn').textContent = m ? '\u{1F507}' : '\u{1F50A}';
+}
+
 // ---------- GAME LOGIC ----------
 function torch(it){
-  if (it.hit || fireCooldown > 0) return;
+  if (it.hit) return;
+  if (fireCooldown > 0){
+    // queue the shot — a small puff at the mouth shows it registered
+    pending = it;
+    const m = mouthPos();
+    for(let i=0;i<3;i++) particles.push({
+      x:m.x, y:m.y, vx:face*(0.5+Math.random()), vy:-0.4-Math.random()*0.5, life:12, c:PAL.lavShade
+    });
+    return;
+  }
   it.hit = true;
   breatheFire(it);
+  sfx('fire');
   if (it.bad){
     score += 50; burnedBad++;
     burst(it.x, it.y, PAL.ember, 18);
@@ -661,6 +752,7 @@ function torch(it){
     score = Math.max(0, score - 40); singed++;
     dragonMood = 'sheepish'; moodTimer = 45;
     burst(it.x, it.y, PAL.lav, 14);
+    sfx('singe');
   }
 }
 
@@ -678,9 +770,17 @@ function update(){
   t++;
   if (fireCooldown > 0) fireCooldown--;
   if (flash > 0) flash--;
+  // release a queued shot once the fire has recharged
+  if (fireCooldown === 0 && pending){
+    const it = pending; pending = null;
+    if (state === 'play' && !it.hit && items.includes(it)) torch(it);
+  }
 
   if (state === 'play'){
     playT++;
+    if (playT >= NIGHT_LEN) endGame(true); // dawn breaks — the archive endures
+  }
+  if (state === 'play'){
     speedMult = Math.min(2.4, 1 + playT/3200);
     spawnTimer--;
     if (spawnTimer <= 0){
@@ -697,10 +797,12 @@ function update(){
         if (it.bad){
           corrupted++; flash = 14;
           burst(it.x, H-100, PAL.sage, 16);
-          if (corrupted >= 3) endGame();
+          sfx('bad');
+          if (corrupted >= 3) endGame(false);
         } else {
-          score += 25; saved++;
+          score += it.golden ? 75 : 25; saved++;
           burst(it.x, H-100, PAL.flame, 16);
+          sfx(it.golden ? 'gold' : 'coin');
         }
       }
     });
@@ -731,11 +833,23 @@ function render(){
   drawDragon();
   drawFlames();
   drawParticles();
+  // fire recharge pip above the dragon
+  if (state === 'play' && fireCooldown > 0){
+    ctx.fillStyle = PAL.ember;
+    ctx.fillRect(HOARD.x-12, dragonTop()-6, 24*(fireCooldown/14), 3);
+  }
+  if (paused){
+    ctx.fillStyle = 'rgba(20,12,32,.5)'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = PAL.cream; ctx.textAlign = 'center';
+    ctx.font = '36px VT323, monospace'; ctx.fillText('PAUSED', W/2, H/2);
+    ctx.font = '18px VT323, monospace'; ctx.fillText('press P to resume', W/2, H/2+26);
+    ctx.textAlign = 'left';
+  }
   document.getElementById('score').textContent = score;
   document.getElementById('integrity').textContent = Math.round((1 - corrupted/3)*100);
 }
 
-function loop(){ update(); render(); requestAnimationFrame(loop); }
+function loop(){ if (!paused) update(); render(); requestAnimationFrame(loop); }
 loop();
 
 // ---------- STATE CONTROL ----------
@@ -744,28 +858,52 @@ function startGame(){
   score = 0; corrupted = 0; burnedBad = 0; singed = 0; saved = 0;
   items = []; particles = []; flames = []; zzz = [];
   playT = 0; spawnTimer = 55; speedMult = 1; fireCooldown = 0; flash = 0;
+  paused = false; pending = null;
   dragonMood = 'alert'; moodTimer = 0; face = -1;
+  try { if (!muted) audioCtx(); } catch(e){} // unlock audio on the user gesture
   document.getElementById('startOverlay').classList.add('hidden');
   document.getElementById('endOverlay').classList.add('hidden');
 }
-function endGame(){
+function updateBestLine(){
+  let b = null;
+  try { b = JSON.parse(localStorage.getItem('dw-best') || 'null'); } catch(e){}
+  document.getElementById('bestLine').textContent =
+    b ? `BEST NIGHT: ${b.gold} GOLD · ${b.integ}% INTEGRITY` : '';
+}
+function endGame(win){
   state = 'over'; dragonMood = 'sleep'; moodTimer = 0; items = [];
+  paused = false; pending = null;
   const integ = Math.round((1 - corrupted/3)*100);
+  const screened = burnedBad + singed + saved + corrupted;
+  sfx(win ? 'win' : 'lose');
+  let best = null, isBest = false;
+  try {
+    best = JSON.parse(localStorage.getItem('dw-best') || 'null');
+    isBest = score > 0 && (!best || score > best.gold);
+    if (isBest) localStorage.setItem('dw-best', JSON.stringify({ gold: score, integ }));
+  } catch(e){}
+  updateBestLine();
   document.getElementById('endTitle').textContent =
-    corrupted >= 3 ? 'THE ARCHIVE IS COMPROMISED' : 'THE ARCHIVE ENDURES';
+    win ? 'THE ARCHIVE ENDURES' : 'THE ARCHIVE IS COMPROMISED';
   document.getElementById('endStats').innerHTML =
-    `Threats burned: ${burnedBad} &nbsp;&middot;&nbsp; Treasures landed: ${saved} &nbsp;&middot;&nbsp; Treasures singed: ${singed}<br>` +
-    `Final gold: ${score}<br>Integrity of the Archive: ${integ}%<br><br>` +
-    `<em>The dragon returns to sleep. The data keeps its promises.</em>`;
+    `&mdash; NIGHT REPORT &mdash;<br>` +
+    `Items screened: ${screened} &nbsp;&middot;&nbsp; Threats burned: ${burnedBad}<br>` +
+    `Treasures archived: ${saved} &nbsp;&middot;&nbsp; Treasures singed: ${singed}<br>` +
+    `Gold: ${score}${isBest ? ' &nbsp;&#10022; new best' : ''} &nbsp;&middot;&nbsp; Integrity of the Archive: ${integ}%<br><br>` +
+    (win ? `<em>Dawn breaks. The dragon returns to sleep. The data keeps its promises.</em>`
+         : `<em>Too many threats slipped in. The dragon will guard better tomorrow.</em>`);
   document.getElementById('endOverlay').classList.remove('hidden');
 }
 
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('restartBtn').addEventListener('click', startGame);
+document.getElementById('muteBtn').addEventListener('click', () => setMuted(!muted));
+setMuted(muted);
+updateBestLine();
 
 // ---------- INPUT ----------
 cv.addEventListener('pointerdown', e => {
-  if (state !== 'play') return;
+  if (state !== 'play' || paused) return;
   e.preventDefault();
   const r = cv.getBoundingClientRect();
   const mx = (e.clientX - r.left) * (W / r.width);
@@ -783,9 +921,12 @@ cv.addEventListener('pointerdown', e => {
 window.addEventListener('keydown', e => {
   if (e.code === 'Space'){
     e.preventDefault();
+    if (paused){ paused = false; return; }
     if (state === 'play'){ const it = nearestItem(); if (it) torch(it); }
     else startGame();
   }
+  if (e.code === 'KeyP' && state === 'play') paused = !paused;
+  if (e.code === 'KeyM') setMuted(!muted);
 });
 })();
 </script>
