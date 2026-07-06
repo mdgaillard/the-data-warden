@@ -1,5 +1,8 @@
-// Generates 64x64 pixel maps for The Data Warden dragon.
-// Legend: . blank  K outline(#241A38)  P plum  L lavender  G gold  H gold-light  W cream
+// Generates 64x64 pixel maps for The Data Warden wyvern.
+// Legend: . blank  K outline  P plum  Q plum shade  R plum highlight
+//         L lavender membrane  M membrane shade  G gold  H gold light  W cream
+// Run `node tools/dragon-gen.js show <pose>` to preview in the terminal,
+// `node tools/dragon-gen.js emit` to bake the maps into index.html.
 const N = 64;
 
 function newGrid(){ return Array.from({length:N},()=>Array(N).fill('.')); }
@@ -16,17 +19,32 @@ function bez(p0,p1,p2,t){
   const q=1-t;
   return [q*q*p0[0]+2*q*t*p1[0]+t*t*p2[0], q*q*p0[1]+2*q*t*p1[1]+t*t*p2[1]];
 }
-function strokeBez(g,p0,p1,p2,r0,r1,c){
+function bezD(p0,p1,p2,t){
+  return [2*(1-t)*(p1[0]-p0[0])+2*t*(p2[0]-p1[0]), 2*(1-t)*(p1[1]-p0[1])+2*t*(p2[1]-p1[1])];
+}
+function strokeBez(g,p0,p1,p2,r0,r1,c,maskFn){
   for(let t=0;t<=1;t+=0.02){
     const [x,y]=bez(p0,p1,p2,t);
-    fillEllipse(g,x,y,r0+(r1-r0)*t,r0+(r1-r0)*t,c);
+    fillEllipse(g,x,y,r0+(r1-r0)*t,r0+(r1-r0)*t,c,maskFn);
   }
 }
-function strokeBezMasked(g,p0,p1,p2,r0,r1,c){ // paints only over plum
-  for(let t=0;t<=1;t+=0.02){
-    const [x,y]=bez(p0,p1,p2,t);
-    fillEllipse(g,x,y,r0+(r1-r0)*t,r0+(r1-r0)*t,c,cc=>cc==='P');
+function line(g,a,b,r,c,maskFn){
+  const steps = Math.max(Math.abs(b[0]-a[0]),Math.abs(b[1]-a[1]))*2+1;
+  for(let i=0;i<=steps;i++){
+    const t=i/steps;
+    fillEllipse(g,a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,r,r,c,maskFn);
   }
+}
+function fillTri(g,a,b,c,ch,maskFn){
+  const xs=[a[0],b[0],c[0]], ys=[a[1],b[1],c[1]];
+  const sgn=(p,q,r)=>(p[0]-r[0])*(q[1]-r[1])-(q[0]-r[0])*(p[1]-r[1]);
+  for(let y=Math.floor(Math.min(...ys));y<=Math.ceil(Math.max(...ys));y++)
+    for(let x=Math.floor(Math.min(...xs));x<=Math.ceil(Math.max(...xs));x++){
+      const pt=[x,y];
+      const d1=sgn(pt,a,b), d2=sgn(pt,b,c), d3=sgn(pt,c,a);
+      const neg=(d1<0)||(d2<0)||(d3<0), pos=(d1>0)||(d2>0)||(d3>0);
+      if(!(neg&&pos) && (!maskFn || maskFn(get(g,x,y)))) set(g,x,y,ch);
+    }
 }
 function outlineSilhouette(g){
   const K=[];
@@ -37,7 +55,7 @@ function outlineSilhouette(g){
   }
   K.forEach(([x,y])=>g[y][x]='K');
 }
-function seam(g,from,into){ // cells of `from` touching `into` become K
+function seam(g,from,into){
   const K=[];
   for(let y=0;y<N;y++) for(let x=0;x<N;x++){
     if(g[y][x]!==from) continue;
@@ -45,82 +63,116 @@ function seam(g,from,into){ // cells of `from` touching `into` become K
   }
   K.forEach(([x,y])=>g[y][x]='K');
 }
-
-function drawBase(g){
-  // tail: wraps from right flank around the front-bottom, tip curling up at left
-  strokeBez(g,[54,48],[40,63],[15,57],5,2.2,'P');
-  fillEllipse(g,13,56,2.2,2.2,'P');   // tip curls forward, low
-  fillEllipse(g,11,54,1.5,1.5,'P');
-  // body: curled mound
-  fillEllipse(g,36,44,19,13,'P');
-  // gold belly on the front (left) flank, scale bands added later
-  fillEllipse(g,25,46,8,10,'G',c=>c==='P');
-  // folded wing resting on the back
-  fillEllipse(g,40,35,12,7.5,'L',c=>c==='P'||c==='.');
+function shadeEllipse(g,cx,cy,rx,ry){
+  // lower-right rim of an ellipse turns to shade for a rounded, muscular read
+  for(let y=Math.floor(cy-ry);y<=Math.ceil(cy+ry);y++)
+    for(let x=Math.floor(cx-rx);x<=Math.ceil(cx+rx);x++){
+      if(get(g,x,y)!=='P') continue;
+      const dx=(x-cx)/rx, dy=(y-cy)/ry, r2=dx*dx+dy*dy;
+      if(r2>=0.48 && r2<=1 && dx+dy>0.42) set(g,x,y,'Q');
+    }
 }
-function addScales(g){
-  for(let y=0;y<N;y++) for(let x=0;x<N;x++)
-    if(g[y][x]==='G' && y%3===0) g[y][x]='H';
-}
-function wingRibs(g){
-  // thin rib grooves fanning from the wing shoulder, only carved into lavender
-  [[ [33,40],[40,30],[49,30] ],[ [33,40],[43,33],[52,35] ],[ [33,40],[42,37],[50,41] ]].forEach(([p0,p1,p2])=>{
-    for(let t=0;t<=1;t+=0.04){
-      const [x,y]=bez(p0,p1,p2,t);
-      if(get(g,Math.round(x),Math.round(y))==='L') set(g,x,y,'K');
+function spikesAlong(g,p0,p1,p2,ts,sign,r0,r1){
+  // back-ridge spikes standing off the outer edge of a bezier limb
+  ts.forEach(t=>{
+    const [x,y]=bez(p0,p1,p2,t), [dx,dy]=bezD(p0,p1,p2,t);
+    const len=Math.hypot(dx,dy)||1;
+    const nx=sign*(-dy/len), ny=sign*(dx/len);
+    const tx=dx/len, ty=dy/len;
+    const r=(r0+(r1-r0)*t)-0.5; // hug the stroke surface
+    for(let k=0;k<4;k++){ // 2-wide tapering spike, 4 long
+      const px=x+nx*(r+k), py=y+ny*(r+k);
+      set(g,px,py,'P');
+      if(k<2){ set(g,px+tx,py+ty,'P'); set(g,px-tx,py-ty,'P'); }
     }
   });
 }
+
+// ---------------- shared anatomy (chunky reference form) ----------------
+function drawWing(g,S,hand,tips,B){
+  // webbed wing: shade membrane, brighter core, scalloped edge, ink finger spines
+  const triset=[[hand,tips[0],tips[1]],[hand,tips[1],tips[2]],[hand,tips[2],B],[S,hand,B]];
+  triset.forEach(([a,b,c])=>fillTri(g,a,b,c,'M'));
+  const pull=(p,f)=>[hand[0]+(p[0]-hand[0])*f, hand[1]+(p[1]-hand[1])*f];
+  triset.forEach(([a,b,c])=>fillTri(g,pull(a,0.68),pull(b,0.68),pull(c,0.68),'L',cc=>cc==='M'));
+  for(let i=0;i<tips.length-1;i++){
+    const mx=(tips[i][0]+tips[i+1][0])/2, my=(tips[i][1]+tips[i+1][1])/2;
+    const dx=mx-hand[0], dy=my-hand[1], dl=Math.hypot(dx,dy);
+    fillEllipse(g,mx+dx/dl*2.8,my+dy/dl*2.8,3.6,3.6,'.',c=>c==='L'||c==='M');
+  }
+  strokeBez(g,S,[(S[0]+hand[0])/2,(S[1]+hand[1])/2-2],hand,1.8,1.2,'P');
+  tips.forEach(tip=>{
+    line(g,hand,tip,0.8,'K',c=>c==='L'||c==='M'||c==='.');
+    set(g,tip[0],tip[1],'H');
+  });
+}
+
+function bigHead(g,cx,cy,mzx,mzy){
+  fillEllipse(g,cx,cy,9,8,'P');            // cranium — big, cute
+  fillEllipse(g,mzx,mzy,6,4.5,'P');        // prominent rounded muzzle
+  fillEllipse(g,mzx+2,mzy-1,4,2,'R',c=>c==='P'); // muzzle-top highlight
+}
+
 function horns(g,hx,hy){
-  // crown-like: three gold points across the head top (drawn after outlining
-  // so the 1px features keep their gold instead of being eaten by the pass)
   [[hx-3,hy],[hx,hy-1],[hx+3,hy]].forEach(([x,y])=>{
     set(g,x,y-2,'H'); set(g,x,y-1,'H'); set(g,x,y,'G');
   });
 }
 
-function makeSleep(){
+// ---------------- poses ----------------
+function makeAwake(eyes){
   const g=newGrid();
-  drawBase(g);
-  // long neck curving up-left, head bowed in sleep
-  strokeBez(g,[27,37],[12,24],[17,14],4.5,3.8,'P');
-  fillEllipse(g,18,15,7,5.5,'P');       // head
-  fillEllipse(g,11,18,3.5,2.3,'P');     // snout, dipped low
-  // gold under-neck plates (masked so they stay inside the body)
-  strokeBezMasked(g,[23,39],[10,25],[13,18],1.7,1.3,'G');
-  addScales(g);
+  // thick tail sweeping up the right side, barb pointing up (ref pose)
+  strokeBez(g,[44,52],[61,58],[56,38],4.5,2,'P');
+  fillTri(g,[57,31],[52,38],[62,38],'P');
+  // pear body + short thick neck
+  fillEllipse(g,35,44,13,12,'P');
+  fillEllipse(g,36,52,15,8,'P');
+  fillEllipse(g,28,28,7,7,'P');            // neck bridge into the head
+  // front paws
+  fillEllipse(g,24,58,4,2.5,'P'); fillEllipse(g,32,59,4,2.5,'P');
+  // gold belly down the front
+  fillEllipse(g,27,44,7,12,'G',c=>c==='P');
+  drawWing(g,[40,30],[48,18],[[58,12],[61,22],[56,31]],[46,36]);
+  bigHead(g,23,16,12,21);
+  shadeEllipse(g,35,44,13,12);
+  shadeEllipse(g,36,52,15,8);
   outlineSilhouette(g);
-  seam(g,'L','P'); wingRibs(g);
-  horns(g,18,11);
-  // closed eye: gentle lash arc
-  set(g,13,15,'K'); set(g,14,16,'K'); set(g,15,17,'K'); set(g,16,17,'K'); set(g,17,16,'K');
-  set(g,10,18,'K'); // nostril
+  seam(g,'L','P'); seam(g,'M','P');
+  horns(g,23,8);
+  if(eyes==='shut'){
+    set(g,17,15,'K'); set(g,18,14,'K'); set(g,19,14,'K'); set(g,20,15,'K');
+  } else {
+    set(g,18,14,'W'); set(g,19,14,'W');
+    set(g,18,15,'K'); set(g,19,15,'W');
+  }
+  set(g,8,20,'K');                          // nostril
+  set(g,8,23,'K'); set(g,9,23,'K');         // mouth crease
+  if(eyes==='fire'){                        // parted jaw
+    set(g,6,24,'K'); set(g,7,24,'K'); set(g,8,24,'K'); set(g,7,25,'K');
+  }
   return g;
 }
 
-function makeAwake(eyes){ // eyes: 'open' | 'shut' | 'fire'
+function makeSleep(){
   const g=newGrid();
-  drawBase(g);
-  // neck raised high — swan curve
-  strokeBez(g,[27,37],[12,20],[19,9],4.5,3.8,'P');
-  fillEllipse(g,19,8,6.5,5,'P');        // head
-  fillEllipse(g,12,10,3.5,2.3,'P');     // snout
-  strokeBezMasked(g,[23,39],[10,22],[14,12],1.7,1.3,'G'); // gold throat
-  addScales(g);
+  // tail wraps around the front, barb resting near the head
+  strokeBez(g,[52,54],[42,63],[22,59],4.5,2,'P');
+  fillTri(g,[19,53],[15,59],[23,59],'P');
+  // curled mound body + neck bridge
+  fillEllipse(g,38,47,15,11,'P');
+  fillEllipse(g,26,46,6,6,'P');
+  // small gold chest peeking under the chin
+  fillEllipse(g,27,52,5,4,'G',c=>c==='P');
+  drawWing(g,[36,38],[43,27],[[51,21],[54,29],[50,36]],[42,42]);
+  bigHead(g,17,45,8,49);                    // head resting low
+  shadeEllipse(g,38,47,15,11);
   outlineSilhouette(g);
-  seam(g,'L','P'); wingRibs(g);
-  horns(g,19,4);
-  if(eyes==='open'||eyes==='fire'){
-    set(g,15,7,'W'); set(g,16,7,'W');
-    set(g,15,8,'K'); set(g,16,8,'W');   // pupil forward-low
-  } else { // shut (sheepish): happy arcs
-    set(g,14,8,'K'); set(g,15,7,'K'); set(g,16,7,'K'); set(g,17,8,'K');
-  }
-  set(g,12,10,'K'); // nostril
-  if(eyes==='fire'){ // open mouth
-    set(g,11,11,'K'); set(g,12,11,'K'); set(g,13,11,'K');
-    set(g,11,12,'K'); set(g,12,12,'K');
-  }
+  seam(g,'L','P'); seam(g,'M','P');
+  horns(g,17,37);
+  // closed contented eye
+  set(g,13,44,'K'); set(g,14,45,'K'); set(g,15,45,'K'); set(g,16,44,'K');
+  set(g,4,48,'K');                          // nostril
   return g;
 }
 
@@ -136,7 +188,6 @@ if(mode==='show'){
   const which = process.argv[3] || 'sleep';
   console.log(maps[which].map(r=>r.join('')).join('\n'));
 } else if(mode==='emit'){
-  // splice into index.html between markers
   const fs=require('fs');
   const file=require('path').join(__dirname,'..','index.html');
   let html=fs.readFileSync(file,'utf8');
@@ -144,7 +195,7 @@ if(mode==='show'){
     `  ${k}: [\n` + g.map(r=>`    "${r.join('')}",`).join('\n') + '\n  ],'
   ).join('\n') + '\n};';
   html = html.replace(/\/\/ __DRAGON_MAPS_START__[\s\S]*?\/\/ __DRAGON_MAPS_END__/,
-    '// __DRAGON_MAPS_START__ (generated by dragon-gen.js)\n' + body + '\n// __DRAGON_MAPS_END__');
+    '// __DRAGON_MAPS_START__ (generated by tools/dragon-gen.js)\n' + body + '\n// __DRAGON_MAPS_END__');
   fs.writeFileSync(file,html);
   console.log('emitted maps into index.html');
 }
