@@ -1,0 +1,3 @@
+# Generated, self-contained build (index.html + inlined VT323 font).
+# Reproducible via the tools/ build step; not source. Do not commit.
+the-data-warden.html
