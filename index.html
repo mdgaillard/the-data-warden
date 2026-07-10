@@ -139,12 +139,12 @@ const PAL = {
 let state = 'idle'; // idle | play | over
 let score = 0, corrupted = 0, singed = 0, burnedBad = 0, saved = 0;
 let items = [], flames = [], particles = [], zzz = [];
-let t = 0, playT = 0, spawnTimer = 0, speedMult = 1;
+let t = 0, playMs = 0, lastNow = 0, spawnTimer = 0, speedMult = 1;
 let dragonMood = 'sleep'; // sleep | alert | fire | sheepish
 let moodTimer = 0, face = -1, fireCooldown = 0, flash = 0;
 let paused = false, pending = null; // queued shot while the fire recharges
 let level = 1, lastWin = false;     // level rises each dawn; harder every time
-const NIGHT_LEN = 4200;             // frames (~70s): survive the night to clear a level
+const NIGHT_MS = 60000;             // wall-clock: every night is a hard 1-minute cap
 const HOARD = { x: W/2, y: H - 110 };
 
 const THREATS = [
@@ -165,7 +165,7 @@ const constel = [
 ];
 
 // ---------- BACKGROUND ----------
-function dawnProgress(){ return state==='play' ? Math.min(1, playT/NIGHT_LEN) : 0; }
+function dawnProgress(){ return state==='play' ? Math.min(1, playMs/NIGHT_MS) : 0; }
 function lerpC(a,b,f){
   const pa = parseInt(a.slice(1),16), pb = parseInt(b.slice(1),16);
   const r  = ((pa>>16)      + (((pb>>16)      - (pa>>16))*f))      | 0;
@@ -647,7 +647,7 @@ function drawFlames(){
 // ---------- ITEMS (fly in arcs toward the hoard) ----------
 function spawnItem(){
   // threats thicken toward dawn and lean heavier each level
-  const bias = Math.min(0.82, 0.45 + 0.25*Math.min(1, playT/NIGHT_LEN) + (level-1)*0.03);
+  const bias = Math.min(0.82, 0.45 + 0.25*Math.min(1, playMs/NIGHT_MS) + (level-1)*0.03);
   const bad = Math.random() < bias;
   const golden = !bad && Math.random() < 0.07;            // rare high-value treasure
   const pool = bad ? THREATS : TREASURES;
@@ -803,20 +803,25 @@ function update(){
   }
 
   if (state === 'play'){
-    playT++;
-    if (playT >= NIGHT_LEN) endGame(true); // dawn breaks — the archive endures
+    // accumulate real elapsed time (cap the delta so a backgrounded tab or
+    // a resume from pause can't jump the clock), then end the night at 60s
+    const now = performance.now();
+    if (lastNow) playMs += Math.min(100, now - lastNow);
+    lastNow = now;
+    if (playMs >= NIGHT_MS) endGame(true); // dawn breaks — the archive endures
   }
   if (state === 'play'){
     // within-night ramp (level 1 keeps the original gentle curve), then
     // each level flies faster (spd) and spawns more often (vol)
-    const ramp = Math.min(2.4, 1 + playT/3200);
+    const sec = playMs / 1000;
+    const ramp = Math.min(2.4, 1 + sec/45);
     const spd = 1 + (level - 1) * 0.16;
     const vol = 1 + (level - 1) * 0.22;
     speedMult = ramp * spd;
     spawnTimer--;
     if (spawnTimer <= 0){
       spawnItem();
-      spawnTimer = Math.max(45, 115 - playT/50) / (ramp * vol);
+      spawnTimer = Math.max(45, 115 - sec*1.6) / (ramp * vol);
     }
     items.forEach(it => {
       if (it.hit) return;
@@ -869,11 +874,18 @@ function render(){
     ctx.fillStyle = PAL.ember;
     ctx.fillRect(HOARD.x-12, dragonTop()-6, 24*(fireCooldown/14), 3);
   }
-  // level indicator during play
+  // level indicator + dawn countdown during play
   if (state === 'play'){
-    ctx.globalAlpha = 0.85; ctx.fillStyle = PAL.lavSoft;
+    const secsLeft = Math.max(0, Math.ceil((NIGHT_MS - playMs) / 1000));
+    ctx.globalAlpha = 0.9; ctx.fillStyle = PAL.lavSoft;
     ctx.font = '18px VT323, monospace'; ctx.textAlign = 'center';
-    ctx.fillText('NIGHT ' + level, W/2, 22);
+    ctx.fillText('NIGHT ' + level + '  ·  DAWN IN ' + secsLeft + 's', W/2, 20);
+    // thin progress-to-dawn bar
+    const bw = 180, bx = W/2 - bw/2, by = 27;
+    ctx.globalAlpha = 0.35; ctx.fillStyle = PAL.lavShade;
+    ctx.fillRect(bx, by, bw, 3);
+    ctx.globalAlpha = 0.9; ctx.fillStyle = PAL.goldHi;
+    ctx.fillRect(bx, by, bw * dawnProgress(), 3);
     ctx.globalAlpha = 1; ctx.textAlign = 'left';
   }
   if (paused){
@@ -895,7 +907,7 @@ function startGame(){
   state = 'play';
   score = 0; corrupted = 0; burnedBad = 0; singed = 0; saved = 0;
   items = []; particles = []; flames = []; zzz = [];
-  playT = 0; spawnTimer = 55; speedMult = 1; fireCooldown = 0; flash = 0;
+  playMs = 0; lastNow = 0; spawnTimer = 55; speedMult = 1; fireCooldown = 0; flash = 0;
   paused = false; pending = null;
   dragonMood = 'alert'; moodTimer = 0; face = -1;
   try { if (!muted) audioCtx(); } catch(e){} // unlock audio on the user gesture
