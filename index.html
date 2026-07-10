@@ -89,7 +89,7 @@
       <div class="startTop">
         <h1>THE DATA WARDEN</h1>
         <p class="lore">Quill the dragon protects a registry hoard of priceless knowledge.<br>Protect these treasured insights so that the realm&rsquo;s secrets and wonders may be revealed.</p>
-        <p class="how">Torch the threats before they reach the hoard &mdash; click, tap, or SPACE.<br>Survive the night to save the archive.</p>
+        <p class="how">Torch the threats before they reach the hoard &mdash; click, tap, or SPACE.<br>Survive each night to advance &mdash; every night comes swifter and fuller.</p>
         <p class="best" id="bestLine"></p>
       </div>
       <button id="startBtn">WAKE THE WARDEN</button>
@@ -143,7 +143,8 @@ let t = 0, playT = 0, spawnTimer = 0, speedMult = 1;
 let dragonMood = 'sleep'; // sleep | alert | fire | sheepish
 let moodTimer = 0, face = -1, fireCooldown = 0, flash = 0;
 let paused = false, pending = null; // queued shot while the fire recharges
-const NIGHT_LEN = 9000;             // frames (~2.5 min): survive the night to win
+let level = 1, lastWin = false;     // level rises each dawn; harder every time
+const NIGHT_LEN = 4200;             // frames (~70s): survive the night to clear a level
 const HOARD = { x: W/2, y: H - 110 };
 
 const THREATS = [
@@ -645,7 +646,8 @@ function drawFlames(){
 
 // ---------- ITEMS (fly in arcs toward the hoard) ----------
 function spawnItem(){
-  const bias = 0.45 + 0.25*Math.min(1, playT/NIGHT_LEN); // threats thicken toward dawn
+  // threats thicken toward dawn and lean heavier each level
+  const bias = Math.min(0.82, 0.45 + 0.25*Math.min(1, playT/NIGHT_LEN) + (level-1)*0.03);
   const bad = Math.random() < bias;
   const golden = !bad && Math.random() < 0.07;            // rare high-value treasure
   const pool = bad ? THREATS : TREASURES;
@@ -805,11 +807,16 @@ function update(){
     if (playT >= NIGHT_LEN) endGame(true); // dawn breaks — the archive endures
   }
   if (state === 'play'){
-    speedMult = Math.min(2.4, 1 + playT/3200);
+    // within-night ramp (level 1 keeps the original gentle curve), then
+    // each level flies faster (spd) and spawns more often (vol)
+    const ramp = Math.min(2.4, 1 + playT/3200);
+    const spd = 1 + (level - 1) * 0.16;
+    const vol = 1 + (level - 1) * 0.22;
+    speedMult = ramp * spd;
     spawnTimer--;
     if (spawnTimer <= 0){
       spawnItem();
-      spawnTimer = Math.max(45, 115 - playT/50) / speedMult;
+      spawnTimer = Math.max(45, 115 - playT/50) / (ramp * vol);
     }
     items.forEach(it => {
       if (it.hit) return;
@@ -862,6 +869,13 @@ function render(){
     ctx.fillStyle = PAL.ember;
     ctx.fillRect(HOARD.x-12, dragonTop()-6, 24*(fireCooldown/14), 3);
   }
+  // level indicator during play
+  if (state === 'play'){
+    ctx.globalAlpha = 0.85; ctx.fillStyle = PAL.lavSoft;
+    ctx.font = '18px VT323, monospace'; ctx.textAlign = 'center';
+    ctx.fillText('NIGHT ' + level, W/2, 22);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
   if (paused){
     ctx.fillStyle = 'rgba(20,12,32,.5)'; ctx.fillRect(0,0,W,H);
     ctx.fillStyle = PAL.cream; ctx.textAlign = 'center';
@@ -892,35 +906,41 @@ function updateBestLine(){
   let b = null;
   try { b = JSON.parse(localStorage.getItem('dw-best') || 'null'); } catch(e){}
   document.getElementById('bestLine').textContent =
-    b ? `BEST NIGHT: ${b.gold} GOLD · ${b.integ}% INTEGRITY` : '';
+    b ? `BEST: NIGHT ${b.level || 1} · ${b.gold} GOLD` : '';
 }
 function endGame(win){
   state = 'over'; dragonMood = 'sleep'; moodTimer = 0; items = [];
   paused = false; pending = null;
+  lastWin = win;
+  const cleared = level;
   const integ = Math.round((1 - corrupted/3)*100);
   const screened = burnedBad + singed + saved + corrupted;
   sfx(win ? 'win' : 'lose');
-  let best = null, isBest = false;
+  let isBest = false;
   try {
-    best = JSON.parse(localStorage.getItem('dw-best') || 'null');
-    isBest = score > 0 && (!best || score > best.gold);
-    if (isBest) localStorage.setItem('dw-best', JSON.stringify({ gold: score, integ }));
+    const best = JSON.parse(localStorage.getItem('dw-best') || 'null');
+    const bl = best ? (best.level || 1) : 0, bg = best ? best.gold : 0;
+    isBest = win && (cleared > bl || (cleared === bl && score > bg));
+    if (isBest) localStorage.setItem('dw-best', JSON.stringify({ level: cleared, gold: score, integ }));
   } catch(e){}
   updateBestLine();
   document.getElementById('endTitle').textContent =
-    win ? 'THE ARCHIVE ENDURES' : 'THE ARCHIVE IS COMPROMISED';
+    win ? `NIGHT ${cleared} SURVIVED` : 'THE ARCHIVE IS COMPROMISED';
   document.getElementById('endStats').innerHTML =
-    `&mdash; NIGHT REPORT &mdash;<br>` +
+    `&mdash; NIGHT ${cleared} REPORT &mdash;<br>` +
     `Items screened: ${screened} &nbsp;&middot;&nbsp; Threats burned: ${burnedBad}<br>` +
     `Treasures archived: ${saved} &nbsp;&middot;&nbsp; Treasures singed: ${singed}<br>` +
-    `Gold: ${score}${isBest ? ' &nbsp;&#10022; new best' : ''} &nbsp;&middot;&nbsp; Integrity of the Archive: ${integ}%<br><br>` +
-    (win ? `<em>You are a worthy guardian of the data. The realm advances.</em>`
+    `Gold: ${score}${isBest ? ' &nbsp;&#10022; new best' : ''} &nbsp;&middot;&nbsp; Integrity: ${integ}%<br><br>` +
+    (win ? `<em>You are a worthy guardian of the data. The realm advances.</em><br>Night ${cleared + 1} comes swifter and fuller.`
          : `<em>The data is corrupted. Inconsistency and error prevail.</em>`);
+  document.getElementById('restartBtn').textContent = win ? 'NEXT NIGHT' : 'GUARD AGAIN';
+  if (win) level = cleared + 1;
   document.getElementById('endOverlay').classList.remove('hidden');
 }
 
-document.getElementById('startBtn').addEventListener('click', startGame);
-document.getElementById('restartBtn').addEventListener('click', startGame);
+function restart(){ if (!lastWin) level = 1; startGame(); }
+document.getElementById('startBtn').addEventListener('click', restart);
+document.getElementById('restartBtn').addEventListener('click', restart);
 document.getElementById('muteBtn').addEventListener('click', () => setMuted(!muted));
 setMuted(muted);
 updateBestLine();
@@ -947,7 +967,7 @@ window.addEventListener('keydown', e => {
     e.preventDefault();
     if (paused){ paused = false; return; }
     if (state === 'play'){ const it = nearestItem(); if (it) torch(it); }
-    else startGame();
+    else restart();
   }
   if (e.code === 'KeyP' && state === 'play') paused = !paused;
   if (e.code === 'KeyM') setMuted(!muted);
